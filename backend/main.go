@@ -12,10 +12,9 @@ import (
 )
 
 const (
-	uploadDir          = "./uploads"
-	maxMultipartMemory = 32 << 20
-	maxUploadSize      = 32 << 20
-	listenAddr         = ":8080"
+	uploadDir      = "./uploads"
+	maxUploadBytes = 32 << 20
+	listenAddr     = ":8080"
 )
 
 func uploadHandler(w http.ResponseWriter, r *http.Request) {
@@ -24,8 +23,8 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
-	if err := r.ParseMultipartForm(maxMultipartMemory); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
+	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
 			http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
@@ -49,7 +48,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	filename := filepath.Base(header.Filename)
 	if filename == "" || filename == "." || strings.HasPrefix(filename, ".") ||
-		strings.Contains(filename, "\x00") || strings.ContainsAny(filename, `/\`) {
+		strings.Contains(filename, "\x00") || strings.ContainsAny(filename, "/\\") {
 		http.Error(w, "invalid filename", http.StatusBadRequest)
 		return
 	}
