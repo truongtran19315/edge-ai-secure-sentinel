@@ -1,0 +1,22 @@
+# Go
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# STM32CubeIDE build artifacts
+Debug/
+Release/
+*.elf
+*.hex
+*.o
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
