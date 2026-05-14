@@ -41,11 +41,6 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
-		http.Error(w, "failed to create upload directory", http.StatusInternalServerError)
-		return
-	}
-
 	filename := filepath.Base(header.Filename)
 	if filename == "" || filename == "." || strings.HasPrefix(filename, ".") ||
 		strings.Contains(filename, "\x00") || strings.ContainsAny(filename, "/\\") {
@@ -54,7 +49,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dstPath := filepath.Join(uploadDir, filename)
-	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		if os.IsExist(err) {
 			http.Error(w, "file already exists", http.StatusConflict)
@@ -66,7 +61,9 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	defer dst.Close()
 
 	if _, err := io.Copy(dst, file); err != nil {
-		_ = os.Remove(dstPath)
+		if removeErr := os.Remove(dstPath); removeErr != nil {
+			log.Printf("failed to clean up partial upload %q: %v", dstPath, removeErr)
+		}
 		http.Error(w, "failed to save file", http.StatusInternalServerError)
 		return
 	}
@@ -76,11 +73,16 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	http.HandleFunc("/upload", uploadHandler)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		log.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/upload", uploadHandler)
 
 	server := &http.Server{
 		Addr:         listenAddr,
-		Handler:      nil,
+		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
