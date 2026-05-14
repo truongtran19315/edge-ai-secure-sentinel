@@ -1,17 +1,20 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
 	uploadDir          = "./uploads"
 	maxMultipartMemory = 32 << 20
+	maxUploadSize      = 32 << 20
 	listenAddr         = ":8080"
 )
 
@@ -21,7 +24,13 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
 	if err := r.ParseMultipartForm(maxMultipartMemory); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "invalid multipart form", http.StatusBadRequest)
 		return
 	}
@@ -39,7 +48,8 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filename := filepath.Base(header.Filename)
-	if filename == "" || filename == "." || strings.Contains(filename, "\x00") {
+	if filename == "" || filename == "." || strings.HasPrefix(filename, ".") ||
+		strings.Contains(filename, "\x00") || strings.ContainsAny(filename, `/\`) {
 		http.Error(w, "invalid filename", http.StatusBadRequest)
 		return
 	}
@@ -57,6 +67,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	defer dst.Close()
 
 	if _, err := io.Copy(dst, file); err != nil {
+		_ = os.Remove(dstPath)
 		http.Error(w, "failed to save file", http.StatusInternalServerError)
 		return
 	}
@@ -68,8 +79,16 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	http.HandleFunc("/upload", uploadHandler)
 
+	server := &http.Server{
+		Addr:         listenAddr,
+		Handler:      nil,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
 	log.Printf("server listening on %s", listenAddr)
-	if err := http.ListenAndServe(listenAddr, nil); err != nil {
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }
