@@ -1,15 +1,19 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
-const uploadDir = "./uploads"
+const (
+	uploadDir          = "./uploads"
+	maxMultipartMemory = 32 << 20
+	listenAddr         = ":8080"
+)
 
 func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -17,7 +21,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
+	if err := r.ParseMultipartForm(maxMultipartMemory); err != nil {
 		http.Error(w, "invalid multipart form", http.StatusBadRequest)
 		return
 	}
@@ -35,9 +39,18 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filename := filepath.Base(header.Filename)
+	if filename == "" || filename == "." || strings.Contains(filename, "\x00") {
+		http.Error(w, "invalid filename", http.StatusBadRequest)
+		return
+	}
+
 	dstPath := filepath.Join(uploadDir, filename)
-	dst, err := os.Create(dstPath)
+	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
+		if os.IsExist(err) {
+			http.Error(w, "file already exists", http.StatusConflict)
+			return
+		}
 		http.Error(w, "failed to save file", http.StatusInternalServerError)
 		return
 	}
@@ -49,14 +62,14 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	_, _ = w.Write([]byte(fmt.Sprintf("uploaded: %s\n", filename)))
+	_, _ = w.Write([]byte("uploaded\n"))
 }
 
 func main() {
 	http.HandleFunc("/upload", uploadHandler)
 
-	log.Println("server listening on :8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	log.Printf("server listening on %s", listenAddr)
+	if err := http.ListenAndServe(listenAddr, nil); err != nil {
 		log.Fatal(err)
 	}
 }

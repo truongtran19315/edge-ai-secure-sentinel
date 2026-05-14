@@ -1,5 +1,6 @@
 # Go
 bin/
+/backend/main
 *.exe
 *.exe~
 *.dll
